@@ -147,6 +147,19 @@ function AppContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
+
+      if (!analysisRes.ok) {
+          const errorText = await analysisRes.text();
+          let errorMessage = "Analysis failed";
+          try {
+              const errorJson = JSON.parse(errorText);
+              errorMessage = errorJson.error || errorMessage;
+          } catch (e) {
+              errorMessage = `Server Error: ${analysisRes.status}`;
+          }
+          throw new Error(errorMessage);
+      }
+
       const data = await analysisRes.json();
       setResult(data);
       

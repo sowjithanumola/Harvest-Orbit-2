@@ -84,11 +84,12 @@ async function startServer() {
     const nodeData = latestSensorData["FieldNode-01"];
     const sensorInfo = nodeData ? `Local Sensor Temperature: ${nodeData.data.temperature}°C, Local Humidity: ${nodeData.data.humidity}%, Heat Index: ${nodeData.data.heatIndex}°C` : "No recent local sensor data";
 
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: { "User-Agent": "aistudio-build" },
-      },
+    const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
+    const model = ai.getGenerativeModel({
+        model: "gemini-2.0-flash",
+        systemInstruction: `You are Harvest Orbit's Lead Satellite Agronomist AI.
+Translate multispectral satellite data into plain-language, professional, and highly actionable farming advice.
+Avoid generic filler. Every statement should be based on actual available data.`,
     });
 
     const prompt = `
@@ -152,18 +153,14 @@ Format your response strictly in the following JSON structure:
 `;
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: `You are Harvest Orbit's Lead Satellite Agronomist AI.
-Translate multispectral satellite data into plain-language, professional, and highly actionable farming advice.
-Avoid generic filler. Every statement should be based on actual available data.`,
+      const response = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
           responseMimeType: "application/json",
         },
       });
 
-      const jsonText = response.text;
+      const jsonText = response.response.text();
       if (!jsonText) throw new Error("No response from AI");
       const result = JSON.parse(jsonText);
       
@@ -270,7 +267,7 @@ Avoid generic filler. Every statement should be based on actual available data.`
     });
     
     const chat = ai.chats.create({
-        model: "gemini-3.6-flash",
+        model: "gemini-2.0-flash",
         config: {
             history: history || [],
         },
