@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --color-harvest-green: #059669;
+  --color-harvest-green-dark: #047857;
+  --color-accent-blue: #0ea5e9;
+}
+
+@layer base {
+  :root {
+    --background: #f8fafc;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --border: #e2e8f0;
+    --input: #ffffff;
+    --input-foreground: #0f172a;
+    --input-placeholder: #94a3b8;
+    --ring: #059669;
+  }
+
+  .dark {
+    --background: #020617;
+    --card: #0f172a;
+    --card-foreground: #f1f5f9;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --border: #1e293b;
+    --input: #020617;
+    --input-foreground: #f1f5f9;
+    --input-placeholder: #475569;
+    --ring: #10b981;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+.theme-card {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+}
+
+.theme-input {
+  background-color: var(--input);
+  color: var(--input-foreground);
+  border: 1px solid var(--border);
+}
+
+.theme-input::placeholder {
+  color: var(--input-placeholder);
+}
+
+.theme-text-secondary {
+  color: var(--text-secondary);
+}
