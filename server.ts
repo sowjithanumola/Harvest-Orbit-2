@@ -183,11 +183,15 @@ Format your response strictly in the following JSON structure:
 
     const [lat, lon] = coordinates.split(",").map(c => c.trim());
     
-    try {
-        let liveAirTemp, liveWind, liveHumidity, livePrecip;
+    let liveAirTemp, liveWind, liveHumidity, livePrecip;
+    let satelliteSurfTemp = "N/A";
+    let nasaDate = "N/A";
 
-        // 1. Try OpenWeatherMap if API key is available
+    // 1. Fetch Atmospheric Data (Live)
+    try {
         const owmKey = process.env.OPENWEATHERMAP_API_KEY;
+        let omDataFetched = false;
+
         if (owmKey && owmKey !== "") {
             try {
                 const owmUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${owmKey}&units=metric`;
@@ -197,83 +201,85 @@ Format your response strictly in the following JSON structure:
                 if (owmJson.main) {
                     liveAirTemp = owmJson.main.temp;
                     liveHumidity = owmJson.main.humidity;
-                    liveWind = owmJson.wind?.speed ? owmJson.wind.speed * 3.6 : undefined; // Convert m/s to km/h
+                    liveWind = owmJson.wind?.speed ? owmJson.wind.speed * 3.6 : undefined;
                     livePrecip = owmJson.rain?.["1h"] || 0;
+                    omDataFetched = true;
                 }
             } catch (e) {
-                console.error("OpenWeatherMap fetch failed, falling back to Open-Meteo:", e);
+                console.error("OpenWeatherMap failed:", e);
             }
         }
 
-        // 2. Fallback to Open-Meteo if OWM failed or key missing
-        if (liveAirTemp === undefined) {
+        if (!omDataFetched) {
             const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relative_humidity_2m,precipitation&timezone=auto`;
             const omRes = await fetch(openMeteoUrl);
             const omJson: any = await omRes.json();
 
-            liveAirTemp = omJson.current_weather?.temperature;
-            liveWind = omJson.current_weather?.windspeed;
-            
-            const now = new Date();
-            const currentHourStr = now.toISOString().split(':')[0] + ':00';
-            const hourIdx = omJson.hourly?.time?.findIndex((t: string) => t.startsWith(currentHourStr)) || 0;
-            
-            liveHumidity = omJson.hourly?.relative_humidity_2m?.[hourIdx];
-            livePrecip = omJson.hourly?.precipitation?.[hourIdx];
+            if (omJson.current_weather) {
+                liveAirTemp = omJson.current_weather.temperature;
+                liveWind = omJson.current_weather.windspeed;
+                
+                const now = new Date();
+                const currentHourStr = now.toISOString().split(':')[0] + ':00';
+                const hourIdx = omJson.hourly?.time?.findIndex((t: string) => t.startsWith(currentHourStr)) || 0;
+                
+                liveHumidity = omJson.hourly?.relative_humidity_2m?.[hourIdx];
+                livePrecip = omJson.hourly?.precipitation?.[hourIdx];
+            }
         }
+    } catch (e) {
+        console.error("Atmospheric data fetch failed:", e);
+    }
 
-        // 3. Fetch NASA Satellite data (Last available Land Surface Temperature)
+    // 2. Fetch Satellite Data (NASA POWER) - Separated to prevent blocking
+    try {
         const endDate = new Date();
         const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 7);
+        startDate.setDate(startDate.getDate() - 14); // Increased to 14 days for better lag coverage
         const formatNASA = (d: Date) => d.toISOString().split('T')[0].replace(/-/g, '');
         const startStr = formatNASA(startDate);
         const endStr = formatNASA(endDate);
         const powerUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=TS&community=AG&longitude=${lon}&latitude=${lat}&start=${startStr}&end=${endStr}&format=JSON`;
+        
         const powerRes = await fetch(powerUrl);
-        const powerJson: any = await powerRes.json();
-
-        let satelliteSurfTemp = "N/A";
-        let nasaDate = "N/A";
-
-        if (powerJson.properties?.parameter?.TS) {
-            const tsParams = powerJson.properties.parameter.TS;
-            const dates = Object.keys(tsParams).sort().reverse();
-            const sanitize = (val: any) => (val === undefined || val === null || val < -900) ? undefined : val;
-            
-            for (const date of dates) {
-                const ts = sanitize(tsParams[date]);
-                if (ts !== undefined) {
-                    satelliteSurfTemp = `${ts.toFixed(1)}°C`;
-                    nasaDate = date;
-                    break;
+        if (powerRes.ok) {
+            const powerJson: any = await powerRes.json();
+            if (powerJson.properties?.parameter?.TS) {
+                const tsParams = powerJson.properties.parameter.TS;
+                const dates = Object.keys(tsParams).sort().reverse();
+                const sanitize = (val: any) => (val === undefined || val === null || val < -900) ? undefined : val;
+                
+                for (const date of dates) {
+                    const ts = sanitize(tsParams[date]);
+                    if (ts !== undefined) {
+                        satelliteSurfTemp = `${ts.toFixed(1)}°C`;
+                        nasaDate = date;
+                        break;
+                    }
                 }
             }
         }
-
-        return res.json({
-            airTemperature: liveAirTemp !== undefined ? `${liveAirTemp.toFixed(1)}°C` : "N/A",
-            surfaceTemperature: satelliteSurfTemp,
-            humidity: liveHumidity !== undefined ? `${liveHumidity}%` : "N/A",
-            precipitation: livePrecip !== undefined ? `${livePrecip.toFixed(2)} mm` : "0.00 mm",
-            observationDate: nasaDate,
-            windSpeed: liveWind !== undefined ? `${liveWind.toFixed(1)} km/h` : "N/A"
-        });
-
     } catch (e) {
-        console.error("Weather fetch failed:", e);
+        console.error("NASA Satellite data fetch failed:", e);
     }
 
-    // Fallback to local sensor or N/A
+    // 3. Fallback to local sensor ONLY for missing fields
     const nodeData = latestSensorData["FieldNode-01"];
-    res.json({
-      airTemperature: nodeData ? `${nodeData.data.temperature.toFixed(1)}°C` : "N/A",
-      surfaceTemperature: "N/A",
-      humidity: nodeData ? `${nodeData.data.humidity.toFixed(1)}%` : "N/A",
-      precipitation: "N/A",
-      observationDate: "N/A"
+    if (liveAirTemp === undefined && nodeData) {
+        liveAirTemp = nodeData.data.temperature;
+        liveHumidity = nodeData.data.humidity;
+    }
+
+    return res.json({
+        airTemperature: liveAirTemp !== undefined ? `${liveAirTemp.toFixed(1)}°C` : "N/A",
+        surfaceTemperature: satelliteSurfTemp,
+        humidity: liveHumidity !== undefined ? `${liveHumidity}%` : "N/A",
+        precipitation: livePrecip !== undefined ? `${livePrecip.toFixed(2)} mm` : "0.00 mm",
+        observationDate: nasaDate,
+        windSpeed: liveWind !== undefined ? `${liveWind.toFixed(1)} km/h` : "N/A"
     });
   });
+
 
   // Chat Bot Proxy Route
   app.post("/api/chat", async (req, res) => {
