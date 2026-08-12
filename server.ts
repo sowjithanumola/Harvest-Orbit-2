@@ -184,12 +184,45 @@ Format your response strictly in the following JSON structure:
     const [lat, lon] = coordinates.split(",").map(c => c.trim());
     
     try {
-        // 1. Fetch Real-time data from Open-Meteo (Highest accuracy for current atmospheric conditions)
-        const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relative_humidity_2m,precipitation&timezone=auto`;
-        const omRes = await fetch(openMeteoUrl);
-        const omJson: any = await omRes.json();
+        let liveAirTemp, liveWind, liveHumidity, livePrecip;
 
-        // 2. Fetch NASA Satellite data (Last available Land Surface Temperature)
+        // 1. Try OpenWeatherMap if API key is available
+        const owmKey = process.env.OPENWEATHERMAP_API_KEY;
+        if (owmKey && owmKey !== "") {
+            try {
+                const owmUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${owmKey}&units=metric`;
+                const owmRes = await fetch(owmUrl);
+                const owmJson: any = await owmRes.json();
+                
+                if (owmJson.main) {
+                    liveAirTemp = owmJson.main.temp;
+                    liveHumidity = owmJson.main.humidity;
+                    liveWind = owmJson.wind?.speed ? owmJson.wind.speed * 3.6 : undefined; // Convert m/s to km/h
+                    livePrecip = owmJson.rain?.["1h"] || 0;
+                }
+            } catch (e) {
+                console.error("OpenWeatherMap fetch failed, falling back to Open-Meteo:", e);
+            }
+        }
+
+        // 2. Fallback to Open-Meteo if OWM failed or key missing
+        if (liveAirTemp === undefined) {
+            const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relative_humidity_2m,precipitation&timezone=auto`;
+            const omRes = await fetch(openMeteoUrl);
+            const omJson: any = await omRes.json();
+
+            liveAirTemp = omJson.current_weather?.temperature;
+            liveWind = omJson.current_weather?.windspeed;
+            
+            const now = new Date();
+            const currentHourStr = now.toISOString().split(':')[0] + ':00';
+            const hourIdx = omJson.hourly?.time?.findIndex((t: string) => t.startsWith(currentHourStr)) || 0;
+            
+            liveHumidity = omJson.hourly?.relative_humidity_2m?.[hourIdx];
+            livePrecip = omJson.hourly?.precipitation?.[hourIdx];
+        }
+
+        // 3. Fetch NASA Satellite data (Last available Land Surface Temperature)
         const endDate = new Date();
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - 7);
@@ -218,24 +251,13 @@ Format your response strictly in the following JSON structure:
             }
         }
 
-        const liveAirTemp = omJson.current_weather?.temperature;
-        const liveWind = omJson.current_weather?.windspeed;
-        
-        // Find current hour index for humidity/precip
-        const now = new Date();
-        const currentHourStr = now.toISOString().split(':')[0] + ':00';
-        const hourIdx = omJson.hourly?.time?.findIndex((t: string) => t.startsWith(currentHourStr)) || 0;
-        
-        const liveHumidity = omJson.hourly?.relative_humidity_2m?.[hourIdx];
-        const livePrecip = omJson.hourly?.precipitation?.[hourIdx];
-
         return res.json({
             airTemperature: liveAirTemp !== undefined ? `${liveAirTemp.toFixed(1)}°C` : "N/A",
             surfaceTemperature: satelliteSurfTemp,
             humidity: liveHumidity !== undefined ? `${liveHumidity}%` : "N/A",
             precipitation: livePrecip !== undefined ? `${livePrecip.toFixed(2)} mm` : "0.00 mm",
             observationDate: nasaDate,
-            windSpeed: liveWind !== undefined ? `${liveWind} km/h` : "N/A"
+            windSpeed: liveWind !== undefined ? `${liveWind.toFixed(1)} km/h` : "N/A"
         });
 
     } catch (e) {
