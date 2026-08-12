@@ -1,7 +1,9 @@
 
 import { useState, useEffect } from "react";
-import { MapPin } from "lucide-react";
+import { MapPin, Loader2, Info } from "lucide-react";
 import { useTheme } from "./ThemeContext";
+import { ApiClient } from "../lib/apiClient";
+import { APIError } from "../types";
 
 export const SatelliteLocationView = () => {
     const [coords, setCoords] = useState<{lat: number, lng: number} | null>(null);
@@ -14,24 +16,59 @@ export const SatelliteLocationView = () => {
         windSpeed?: string
     } | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<APIError | null>(null);
     const { theme } = useTheme();
 
     useEffect(() => {
+        let mounted = true;
         navigator.geolocation.getCurrentPosition(
-            (pos) => {
+            async (pos) => {
+                if (!mounted) return;
                 const newCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                 setCoords(newCoords);
-                fetch(`/api/weather?coordinates=${newCoords.lat},${newCoords.lng}`)
-                    .then(res => res.json())
-                    .then(data => setWeather(data))
-                    .catch(err => console.error(err))
-                    .finally(() => setLoading(false));
+                
+                try {
+                    const data = await ApiClient.get<{
+                        airTemperature: string, 
+                        surfaceTemperature: string, 
+                        humidity: string, 
+                        precipitation: string,
+                        observationDate: string,
+                        windSpeed?: string
+                    }>(`/api/weather?coordinates=${newCoords.lat},${newCoords.lng}`);
+                    if (mounted) setWeather(data);
+                } catch (err: any) {
+                    if (mounted) setError(err as APIError);
+                } finally {
+                    if (mounted) setLoading(false);
+                }
             },
-            () => setLoading(false)
+            (err) => {
+                if (mounted) {
+                    setError({ code: "GEOLOCATION_ERROR", message: "Location access denied or unavailable." });
+                    setLoading(false);
+                }
+            },
+            { timeout: 10000 }
         );
+        return () => { mounted = false; };
     }, []);
 
-    if (loading) return <div className="p-8 text-center text-slate-500 animate-pulse">🛰️ Syncing NASA Satellite & Live Weather APIs...</div>;
+    if (loading) return (
+        <div className="theme-card p-12 flex flex-col items-center justify-center gap-4 rounded-3xl shadow-sm border border-[var(--border)]">
+            <Loader2 className="w-8 h-8 animate-spin text-harvest-green" />
+            <p className="text-sm font-medium theme-text-secondary animate-pulse text-center">🛰️ Syncing NASA Satellite & Live Weather APIs...</p>
+        </div>
+    );
+
+    if (error) return (
+        <div className="theme-card p-8 flex flex-col items-center justify-center gap-3 rounded-3xl shadow-sm border border-red-100 dark:border-red-900/30 bg-red-50/30 dark:bg-red-900/10">
+            <Info className="text-red-500 w-8 h-8" />
+            <p className="text-sm font-medium text-red-600 dark:text-red-400 text-center">{error.message}</p>
+            <button onClick={() => window.location.reload()} className="text-xs font-bold uppercase tracking-widest text-red-500 hover:underline">Retry Connection</button>
+        </div>
+    );
+
     if (!coords) return <div className="p-8 text-center text-rose-400">Location access required for intelligence synchronization.</div>;
 
     const formattedDate = weather?.observationDate && weather.observationDate !== "N/A" ? 

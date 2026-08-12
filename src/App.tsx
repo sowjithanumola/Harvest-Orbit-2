@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
-import { Map, Mail, Lock, User as UserIcon } from "lucide-react";
-import { SensorData, AnalysisResult } from "./types";
+import React, { useState, useEffect } from "react";
+import { Map, Mail, Lock, User as UserIcon, Loader2 } from "lucide-react";
+import { SensorData, AnalysisResult, APIError } from "./types";
 import { SatelliteSection } from "./components/SatelliteSection";
 import { GroundSensorSection } from "./components/GroundSensorSection";
 import { FieldSummarySection } from "./components/FieldSummarySection";
@@ -22,19 +22,7 @@ import {
 import { ThemeProvider, useTheme } from "./components/ThemeContext";
 import { ProfileModal } from "./components/ProfileModal";
 import { SatelliteLocationView } from "./components/SatelliteLocationView";
-
-interface ChatMessage {
-  role: 'user' | 'bot';
-  content: string;
-}
-
-// Dummy data for graph
-const data = [
-  { name: 'Week 1', ndvi: 0.6 },
-  { name: 'Week 2', ndvi: 0.65 },
-  { name: 'Week 3', ndvi: 0.7 },
-  { name: 'Week 4', ndvi: 0.74 },
-];
+import { ApiClient } from "./lib/apiClient";
 
 export default function App() {
   return (
@@ -47,10 +35,13 @@ export default function App() {
 function AppContent() {
   const { theme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authError, setAuthError] = useState("");
+  
+  const [activeDeviceId, setActiveDeviceId] = useState("FieldNode-01");
   const [formData, setFormData] = useState({
     fieldName: "",
     cropType: "",
@@ -60,43 +51,54 @@ function AppContent() {
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [sensorData, setSensorData] = useState<(SensorData & { isOffline: boolean }) | null>(null);
+  const [sensorData, setSensorData] = useState<SensorData | null>(null);
   const [locLoading, setLocLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
+  const [apiError, setApiError] = useState<APIError | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      setAuthLoading(false);
       if (currentUser) setIsGuest(false);
     });
     return () => unsub();
   }, []);
 
   useEffect(() => {
-    if (!user && !isGuest) return;
-    const unsub = onSnapshot(doc(db, "sensors", "FieldNode-01"), (doc) => {
+    if (!user && !isGuest || !activeDeviceId.trim()) return;
+    
+    const unsub = onSnapshot(doc(db, "sensors", activeDeviceId.trim()), (doc) => {
       if (doc.exists()) {
-        setSensorData(doc.data() as SensorData & { isOffline: boolean });
+        setSensorData(doc.data() as SensorData);
+      } else {
+        setSensorData(null);
       }
     }, (error) => {
         console.error("Firestore error:", error);
     });
     return () => unsub();
-  }, [user, isGuest]);
+  }, [user, isGuest, activeDeviceId]);
 
-  const handleLogin = async (e: React.MouseEvent) => {
+  const handleGoogleLogin = async (e: React.MouseEvent) => {
     e.preventDefault();
+    setAuthError("");
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed:", error);
+      let msg = "Google login failed.";
+      if (error.code === 'auth/popup-closed-by-user') msg = "Login popup was closed before completion.";
+      if (error.code === 'auth/popup-blocked') msg = "Popup was blocked by your browser.";
+      setAuthError(msg);
     }
   };
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
+    setAuthLoading(true);
     try {
         if (isLoginMode) {
             await signInWithEmailAndPassword(auth, email, password);
@@ -104,7 +106,13 @@ function AppContent() {
             await createUserWithEmailAndPassword(auth, email, password);
         }
     } catch (error: any) {
-        setAuthError(error.message);
+        let msg = "Authentication failed.";
+        if (error.code === 'auth/invalid-email') msg = "Invalid email format.";
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') msg = "Invalid email or password.";
+        if (error.code === 'auth/email-already-in-use') msg = "This email is already registered.";
+        setAuthError(msg);
+    } finally {
+        setAuthLoading(false);
     }
   };
 
@@ -125,13 +133,12 @@ function AppContent() {
           setLocLoading(false);
         },
         (error) => {
-          console.error("Geolocation error:", error);
           setLocLoading(false);
-          alert("Could not get location. Please enter coordinates manually.");
-        }
+          console.error("Geolocation error:", error);
+        },
+        { timeout: 10000 }
       );
     } else {
-      alert("Geolocation is not supported by your browser.");
       setLocLoading(false);
     }
   };
@@ -140,35 +147,17 @@ function AppContent() {
     e.preventDefault();
     setLoading(true);
     setResult(null);
+    setApiError(null);
 
     try {
-      const analysisRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+      const data = await ApiClient.post<AnalysisResult>("/api/analyze", {
+          ...formData,
+          deviceId: activeDeviceId
       });
-
-      if (!analysisRes.ok) {
-          const errorText = await analysisRes.text();
-          let errorMessage = "Analysis failed";
-          try {
-              const errorJson = JSON.parse(errorText);
-              errorMessage = errorJson.error || errorMessage;
-          } catch (e) {
-              errorMessage = `Server Error: ${analysisRes.status}`;
-          }
-          throw new Error(errorMessage);
-      }
-
-      const data = await analysisRes.json();
       setResult(data);
-      
-      if (data.alerts?.some((a: any) => a.severity === 'high')) {
-          alert(`High Severity Alert: ${data.alerts.find((a: any) => a.severity === 'high').message}`);
-      }
-    } catch (error) {
-      console.error("Error:", error);
-      alert(error instanceof Error ? error.message : "An unknown error occurred.");
+    } catch (error: any) {
+      console.error("Analysis Error:", error);
+      setApiError(error as APIError);
     } finally {
       setLoading(false);
     }
@@ -181,6 +170,14 @@ function AppContent() {
       return !isNaN(lat) && !isNaN(lng) ? [lat, lng] : null;
   };
   const coords = parseCoordinates(formData.coordinates);
+
+  if (authLoading) {
+      return (
+          <div className="min-h-screen flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-harvest-green" />
+          </div>
+      );
+  }
 
   if (!user && !isGuest) {
       return (
@@ -197,14 +194,16 @@ function AppContent() {
                           <Lock className="absolute left-3 top-3 w-5 h-5 theme-text-secondary" />
                           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
                       </div>
-                      <button type="submit" className="w-full bg-harvest-green text-white py-3 rounded-xl font-bold hover:bg-harvest-green-dark transition-colors">{isLoginMode ? "Login" : "Sign Up"}</button>
+                      <button type="submit" disabled={authLoading} className="w-full bg-harvest-green text-white py-3 rounded-xl font-bold hover:bg-harvest-green-dark transition-colors disabled:opacity-50">
+                          {isLoginMode ? "Login" : "Sign Up"}
+                      </button>
                   </form>
-                  {authError && <p className="text-red-500 text-sm">{authError}</p>}
+                  {authError && <p className="text-red-500 text-sm font-medium">{authError}</p>}
                   <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm theme-text-secondary hover:text-harvest-green underline">
                       {isLoginMode ? "Need an account? Sign up" : "Have an account? Login"}
                   </button>
                   <div className="border-t border-[var(--border)] pt-6 space-y-3">
-                      <button onClick={(e) => handleLogin(e as any)} className="w-full flex items-center justify-center gap-3 theme-card text-slate-900 dark:text-slate-100 py-3 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm border-[var(--border)]">
+                      <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 theme-card text-slate-900 dark:text-slate-100 py-3 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm border-[var(--border)]">
                           <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google" className="w-5 h-5" /> 
                           <span className="theme-text-primary">Login with Google</span>
                       </button>
@@ -236,12 +235,18 @@ function AppContent() {
             <div className="theme-card p-6 rounded-2xl shadow-sm">
                 <h2 className="text-xl font-bold mb-4">📍 Field Location</h2>
                 <div className="flex flex-col sm:flex-row gap-4">
-                    <button onClick={handleUseLocation} className="bg-harvest-green px-6 py-3 rounded-xl text-sm font-bold text-white hover:bg-harvest-green-dark transition-all shadow-lg shadow-harvest-green/20">
+                    <button onClick={handleUseLocation} disabled={locLoading} className="bg-harvest-green px-6 py-3 rounded-xl text-sm font-bold text-white hover:bg-harvest-green-dark transition-all shadow-lg shadow-harvest-green/20 disabled:opacity-50">
                         {locLoading ? "Detecting..." : "Detect My Position"}
                     </button>
+                    <input 
+                        className="theme-input px-4 py-2 rounded-xl text-sm font-mono focus:outline-none focus:ring-1 focus:ring-harvest-green" 
+                        placeholder="Device ID (e.g. FieldNode-01)"
+                        value={activeDeviceId}
+                        onChange={(e) => setActiveDeviceId(e.target.value)}
+                    />
                 </div>
                 <div className="mt-4 p-4 theme-input rounded-xl text-sm font-mono flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-harvest-green animate-pulse" />
+                    <div className={`w-2 h-2 rounded-full ${sensorData ? 'bg-harvest-green animate-pulse' : 'bg-red-500'}`} />
                     <span className="theme-text-secondary">{formData.coordinates || "Pending location selection..."}</span>
                 </div>
             </div>
@@ -281,6 +286,11 @@ function AppContent() {
                         <label className="text-xs font-bold uppercase tracking-widest theme-text-secondary">NDVI Score (Optional)</label>
                         <input name="ndviScore" type="number" step="0.01" value={formData.ndviScore} onChange={handleInputChange} placeholder="0.0 - 1.0" className="w-full p-4 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50 transition-all" />
                     </div>
+                    {apiError && (
+                        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+                            <p className="text-red-600 dark:text-red-400 text-sm font-medium">{apiError.message}</p>
+                        </div>
+                    )}
                     <button type="submit" className="w-full bg-harvest-green p-4 rounded-xl font-bold text-white hover:bg-harvest-green-dark transition-all shadow-lg shadow-harvest-green/20" disabled={loading}>
                     {loading ? "Processing AI Analysis..." : "Analyze Field Health"}
                     </button>

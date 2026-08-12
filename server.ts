@@ -1,7 +1,10 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { NasaService } from "./src/services/nasaService";
+import { WeatherService } from "./src/services/weatherService";
+import { GeminiService } from "./src/services/geminiService";
+import { SensorService } from "./src/services/sensorService";
 
 async function startServer() {
   const app = express();
@@ -9,90 +12,47 @@ async function startServer() {
 
   app.use(express.json());
 
-  app.use((req, res, next) => {
-    console.log(`Request: ${req.method} ${req.url}`);
-    next();
-  });
+  // Helper: Coordinate validation
+  const validateCoords = (coords: any) => {
+    if (typeof coords !== 'string' || !coords.includes(",")) return null;
+    const parts = coords.split(",").map(c => parseFloat(c.trim()));
+    const [lat, lon] = parts;
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat, lon };
+  };
 
-  // Sensor Data Store
-  let latestSensorData: Record<string, { data: any, lastUpdated: number }> = {};
-
-  app.post("/api/sensor-data", (req, res) => {
-    const { deviceId, ...data } = req.body;
-    if (!deviceId) return res.status(400).json({ error: "deviceId required" });
-    latestSensorData[deviceId] = { data, lastUpdated: Date.now() };
-    res.status(200).json({ status: "ok" });
-  });
-
-  app.get("/api/sensor-data/:deviceId", (req, res) => {
-    const { deviceId } = req.params;
-    console.log(`Fetching data for device: ${deviceId}`);
-    const nodeData = latestSensorData[deviceId];
-    if (!nodeData) return res.status(404).json({ error: "Node not found" });
-    
-    // Check if offline (e.g., no update in 60s)
-    const isOffline = Date.now() - nodeData.lastUpdated > 60000;
-    res.json({ ...nodeData.data, isOffline });
-  });
-
-  // Gemini API Proxy Route
+  // API Routes
+  
+  // 1. Analyze Field
   app.post("/api/analyze", async (req, res) => {
-    const { fieldName, cropType, coordinates, ndviScore } = req.body;
-
-    if (!coordinates) {
-      return res.status(400).json({ error: "Coordinates required" });
-    }
-
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: "Gemini API key not configured" });
-    }
-
-    const [lat, lon] = coordinates.split(",").map((c: string) => c.trim());
+    const { fieldName, cropType, coordinates, ndviScore, deviceId = "FieldNode-01" } = req.body;
     
-    let nasaDataArr: any[] = [];
-    try {
-        // Fetch historical meteorological data from NASA POWER API (Last 14 days)
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 14);
-        
-        const formatNASA = (d: Date) => d.toISOString().split('T')[0].replace(/-/g, '');
-        const startStr = formatNASA(startDate);
-        const endStr = formatNASA(endDate);
-        
-        const powerUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=T2M,TS,RH2M,PRECTOTCORR,ALLSKY_SFC_SW_DWN&community=AG&longitude=${lon}&latitude=${lat}&start=${startStr}&end=${endStr}&format=JSON`;
-        const powerRes = await fetch(powerUrl);
-        const powerJson: any = await powerRes.json();
-        
-        if (powerJson.properties?.parameter) {
-            const params = powerJson.properties.parameter;
-            const dates = Object.keys(params.T2M).sort();
-            nasaDataArr = dates.map(date => ({
-                date,
-                airTemp: params.T2M[date],
-                surfaceTemp: params.TS[date],
-                humidity: params.RH2M[date],
-                precipitation: params.PRECTOTCORR[date],
-                solarRadiation: params.ALLSKY_SFC_SW_DWN[date]
-            }));
-        }
-    } catch (e) {
-        console.error("NASA POWER fetch failed:", e);
+    const validated = validateCoords(coordinates);
+    if (!validated) {
+      return res.status(400).json({ 
+        error: { code: "INVALID_COORDINATES", message: "Coordinates must be in 'lat, lon' format within valid ranges." } 
+      });
     }
 
-    const latest = nasaDataArr[nasaDataArr.length - 1] || {};
-    const nodeData = latestSensorData["FieldNode-01"];
-    const sensorInfo = nodeData ? `Local Sensor Temperature: ${nodeData.data.temperature}°C, Local Humidity: ${nodeData.data.humidity}%, Heat Index: ${nodeData.data.heatIndex}°C` : "No recent local sensor data";
+    try {
+      // Parallel fetch NASA and Sensor data
+      const [nasaData, sensorData] = await Promise.all([
+        NasaService.fetchNasaData(validated.lat.toString(), validated.lon.toString()).catch(e => {
+          console.error("NASA fetch failed in analyze:", e);
+          return [];
+        }),
+        SensorService.getSensorData(deviceId).catch(e => {
+          console.error("Sensor fetch failed in analyze:", e);
+          return null;
+        })
+      ]);
 
-    const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
-    const model = ai.getGenerativeModel({
-        model: "gemini-2.0-flash",
-        systemInstruction: `You are Harvest Orbit's Lead Satellite Agronomist AI.
-Translate multispectral satellite data into plain-language, professional, and highly actionable farming advice.
-Avoid generic filler. Every statement should be based on actual available data.`,
-    });
+      const latest: any = nasaData[0] || {};
+      const sensorInfo = sensorData ? 
+        `Local Sensor Temperature: ${sensorData.temperature}°C, Local Humidity: ${sensorData.humidity}%, Soil Moisture: ${sensorData.soilMoisture}%` : 
+        "No recent local sensor data available.";
 
-    const prompt = `
+      const prompt = `
 Analyze the following Earth Observation field report for a professional agricultural intelligence dashboard.
 
 Plot Name: ${fieldName}
@@ -104,218 +64,102 @@ Latest NASA Satellite Meteorological Data (Observed on ${latest.date || "N/A"}):
 - Air Temperature (2m): ${latest.airTemp || "N/A"}°C
 - Land Surface Temperature (Skin): ${latest.surfaceTemp || "N/A"}°C
 - Humidity: ${latest.humidity || "N/A"}%
-- Precipitation: ${latest.precipitation || "N/A"} mm/day
+- Precipitation: ${latest.precip || "N/A"} mm/day
 - Solar Radiation: ${latest.solarRadiation || "N/A"} kWh/m²/day
 
 Historical Trend Summary (Last 14 days):
-${nasaDataArr.map(d => `${d.date}: AirTemp=${d.airTemp}, SurfaceTemp=${d.surfaceTemp}, Precip=${d.precipitation}`).join('\n')}
+${nasaData.map(d => `${d.date}: AirTemp=${d.airTemp}, SurfaceTemp=${d.surfaceTemp}, Precip=${d.precip}`).join('\n')}
 
-Ground Sensor Data (ESP32):
+Ground Sensor Data (IoT):
 ${sensorInfo}
 
-Provide a comprehensive diagnosis and recommendation report.
-Analyze the data for:
-1. Executive Summary: 3-5 professional, data-driven paragraphs.
-2. Agricultural Assessment:
-   - Crop Health (Excellent|Good|Moderate|Poor|Critical)
-   - Temperature Risk (Low|Moderate|High)
-   - Water Stress (Low|Moderate|High)
-   - Detailed justification based on specific metrics.
-3. Environmental Alerts: Detect anomalies (e.g. LST vs AirTemp divergence, heat stress, moisture deficiency).
-4. Recommended Actions: Specific, actionable farming advice.
-
-Format your response strictly in the following JSON structure:
-
-{
-  "plot_name": "String",
-  "executive_summary": "String",
-  "assessment": {
-    "crop_health": "Excellent | Good | Moderate | Poor | Critical",
-    "temp_risk": "Low | Moderate | High",
-    "water_stress": "Low | Moderate | High",
-    "vegetation_condition": "String",
-    "environmental_risk": "String",
-    "justification": "String"
-  },
-  "alerts": [
-    { "type": "String", "severity": "low | medium | high", "message": "String" }
-  ],
-  "action_items": ["String"],
-  "real_metrics": {
-    "airTemp": Number,
-    "surfaceTemp": Number,
-    "humidity": Number,
-    "precip": Number,
-    "ndvi": Number,
-    "observationDate": "String"
-  }
-}
+Provide a comprehensive diagnosis and recommendation report. Analyze crop health, temperature risk, water stress, and suggest specific actions.
 `;
 
-    try {
-      const response = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-        },
+      const analysis = await GeminiService.analyzeField(prompt);
+      
+      // Inject the real metrics back into the response for the UI
+      res.json({
+        ...analysis,
+        real_metrics: {
+          airTemp: latest.airTemp || 0,
+          surfaceTemp: latest.surfaceTemp || 0,
+          humidity: latest.humidity || 0,
+          precip: latest.precip || 0,
+          ndvi: parseFloat(ndviScore) || 0,
+          observationDate: latest.date || new Date().toISOString(),
+          historical: nasaData
+        }
       });
-
-      const jsonText = response.response.text();
-      if (!jsonText) throw new Error("No response from AI");
-      const result = JSON.parse(jsonText);
-      
-      // Inject historical data for charts
-      if (result.real_metrics) {
-          result.real_metrics.historical = nasaDataArr;
-      }
-      
-      res.json(result);
-    } catch (error) {
-      console.error("Gemini API error:", error);
-      res.status(500).json({ error: "Failed to analyze field data" });
+    } catch (error: any) {
+      console.error("Analysis Error:", error);
+      res.status(500).json({ error: { code: "ANALYSIS_FAILED", message: error.message || "An unexpected error occurred during analysis." } });
     }
   });
 
-  // Weather Data Proxy Route
+  // 2. Weather Synchronization
   app.get("/api/weather", async (req, res) => {
-    const { coordinates } = req.query as { coordinates: string };
-    if (!coordinates) return res.status(400).json({ error: "Coordinates required" });
-
-    const [lat, lon] = coordinates.split(",").map(c => c.trim());
+    const { coordinates } = req.query;
+    const validated = validateCoords(coordinates as string);
     
-    let liveAirTemp, liveWind, liveHumidity, livePrecip;
-    let satelliteSurfTemp = "N/A";
-    let nasaDate = "N/A";
+    if (!validated) {
+      return res.status(400).json({ error: "Invalid coordinates provided" });
+    }
 
-    // 1. Fetch Atmospheric Data (Live)
     try {
-        const owmKey = process.env.OPENWEATHERMAP_API_KEY;
-        let omDataFetched = false;
+      const weather = await WeatherService.getWeatherData(validated.lat.toString(), validated.lon.toString());
+      
+      // Also attempt to get the latest Satellite Surface Temp from NASA for the comparison
+      let satelliteTemp = "N/A";
+      let nasaDate = "N/A";
+      try {
+          const nasaHistory = await NasaService.fetchNasaData(validated.lat.toString(), validated.lon.toString(), 7);
+          if (nasaHistory.length > 0) {
+              satelliteTemp = `${nasaHistory[0].surfaceTemp.toFixed(1)}°C`;
+              nasaDate = nasaHistory[0].date;
+          }
+      } catch (e) {
+          console.error("NASA Fetch in weather failed:", e);
+      }
 
-        if (owmKey && owmKey !== "") {
-            try {
-                const owmUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${owmKey}&units=metric`;
-                const owmRes = await fetch(owmUrl);
-                const owmJson: any = await owmRes.json();
-                
-                if (owmJson.main) {
-                    liveAirTemp = owmJson.main.temp;
-                    liveHumidity = owmJson.main.humidity;
-                    liveWind = owmJson.wind?.speed ? owmJson.wind.speed * 3.6 : undefined;
-                    livePrecip = owmJson.rain?.["1h"] || 0;
-                    omDataFetched = true;
-                }
-            } catch (e) {
-                console.error("OpenWeatherMap failed:", e);
-            }
-        }
-
-        if (!omDataFetched) {
-            const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relative_humidity_2m,precipitation&timezone=auto`;
-            const omRes = await fetch(openMeteoUrl);
-            const omJson: any = await omRes.json();
-
-            if (omJson.current_weather) {
-                liveAirTemp = omJson.current_weather.temperature;
-                liveWind = omJson.current_weather.windspeed;
-                
-                const now = new Date();
-                const currentHourStr = now.toISOString().split(':')[0] + ':00';
-                const hourIdx = omJson.hourly?.time?.findIndex((t: string) => t.startsWith(currentHourStr)) || 0;
-                
-                liveHumidity = omJson.hourly?.relative_humidity_2m?.[hourIdx];
-                livePrecip = omJson.hourly?.precipitation?.[hourIdx];
-            }
-        }
-    } catch (e) {
-        console.error("Atmospheric data fetch failed:", e);
+      res.json({
+        ...weather,
+        surfaceTemperature: satelliteTemp !== "N/A" ? satelliteTemp : weather.surfaceTemperature,
+        observationDate: nasaDate !== "N/A" ? nasaDate : weather.observationDate
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to fetch weather data" });
     }
-
-    // 2. Fetch Satellite Data (NASA POWER) - Separated to prevent blocking
-    try {
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 14); // Increased to 14 days for better lag coverage
-        const formatNASA = (d: Date) => d.toISOString().split('T')[0].replace(/-/g, '');
-        const startStr = formatNASA(startDate);
-        const endStr = formatNASA(endDate);
-        const powerUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=TS&community=AG&longitude=${lon}&latitude=${lat}&start=${startStr}&end=${endStr}&format=JSON`;
-        
-        const powerRes = await fetch(powerUrl);
-        if (powerRes.ok) {
-            const powerJson: any = await powerRes.json();
-            if (powerJson.properties?.parameter?.TS) {
-                const tsParams = powerJson.properties.parameter.TS;
-                const dates = Object.keys(tsParams).sort().reverse();
-                const sanitize = (val: any) => (val === undefined || val === null || val < -900) ? undefined : val;
-                
-                for (const date of dates) {
-                    const ts = sanitize(tsParams[date]);
-                    if (ts !== undefined) {
-                        satelliteSurfTemp = `${ts.toFixed(1)}°C`;
-                        nasaDate = date;
-                        break;
-                    }
-                }
-            }
-        }
-    } catch (e) {
-        console.error("NASA Satellite data fetch failed:", e);
-    }
-
-    // 3. Fallback to local sensor ONLY for missing fields
-    const nodeData = latestSensorData["FieldNode-01"];
-    if (liveAirTemp === undefined && nodeData) {
-        liveAirTemp = nodeData.data.temperature;
-        liveHumidity = nodeData.data.humidity;
-    }
-
-    return res.json({
-        airTemperature: liveAirTemp !== undefined ? `${liveAirTemp.toFixed(1)}°C` : "N/A",
-        surfaceTemperature: satelliteSurfTemp,
-        humidity: liveHumidity !== undefined ? `${liveHumidity}%` : "N/A",
-        precipitation: livePrecip !== undefined ? `${livePrecip.toFixed(2)} mm` : "0.00 mm",
-        observationDate: nasaDate,
-        windSpeed: liveWind !== undefined ? `${liveWind.toFixed(1)} km/h` : "N/A"
-    });
   });
 
+  // 3. Sensor Data Ingress (ESP32)
+  app.post("/api/sensor-data", async (req, res) => {
+    const { deviceId, temperature, humidity, soilMoisture, heatIndex } = req.body;
+    if (!deviceId) return res.status(400).json({ error: "deviceId is required" });
 
-  // Chat Bot Proxy Route
+    try {
+      await SensorService.updateSensorData(deviceId, { temperature, humidity, soilMoisture, heatIndex });
+      res.json({ success: true, message: "Sensor data synchronized to Firestore" });
+    } catch (e: any) {
+      console.error("Sensor Sync Error:", e);
+      res.status(500).json({ error: "Failed to sync sensor data" });
+    }
+  });
+
+  // 4. Chat Bot
   app.post("/api/chat", async (req, res) => {
     const { message, history, context } = req.body;
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: "Gemini API key not configured" });
-    }
-    const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: { "User-Agent": "aistudio-build" },
-      },
-    });
-    
-    const chat = ai.chats.create({
-        model: "gemini-2.0-flash",
-        config: {
-            history: history || [],
-        },
-    });
-    
-    const prompt = `Answer the following question about the field, considering the provided context (Field Report and ESP32 Sensor data):
-Question: ${message}
-Context: ${JSON.stringify(context)}
-`;
-    
+    if (!message) return res.status(400).json({ error: "Message is required" });
+
     try {
-        const result = await chat.sendMessage(prompt);
-        res.json({ response: result.text });
-    } catch (error) {
-        console.error("Chat error:", error);
-        res.status(500).json({ error: "Chat error" });
+      const response = await GeminiService.getChatResponse(message, history || [], JSON.stringify(context) || "");
+      res.json({ response });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Chat service unavailable" });
     }
   });
 
-  // Vite middleware setup
+  // Vite/Production Middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

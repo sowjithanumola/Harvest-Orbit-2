@@ -1,8 +1,17 @@
 export interface SensorData {
+  deviceId: string;
   temperature: number;
   humidity: number;
   heatIndex: number;
-  isOffline?: boolean;
+  soilMoisture?: number;
+  timestamp: any; // Firestore timestamp
+  isOnline: boolean;
+}
+
+export interface APIError {
+  code: string;
+  message: string;
+  status?: number;
 }
 
 export interface FieldNode {
