@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { AnalysisResult, SensorData } from '../types';
 import { motion } from 'motion/react';
+import { useTheme } from './ThemeContext';
 
 export function FieldSummarySection({ result, sensorData }: { result: AnalysisResult | null, sensorData: SensorData | null }) {
   const { theme } = useTheme();
