@@ -4,7 +4,7 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAXr0DerMBptWo754Q5ZUNx7gaS1l6whkY",
-  authDomain: "chrome-anvil-w40ks.firebaseapp.com",
+  authDomain: "https://harvest-orbit.vercel.app/",
   projectId: "chrome-anvil-w40ks",
   storageBucket: "chrome-anvil-w40ks.firebasestorage.app",
   messagingSenderId: "30607474566",
