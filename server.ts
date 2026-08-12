@@ -187,44 +187,62 @@ Avoid generic filler. Every statement should be based on actual available data.`
     const [lat, lon] = coordinates.split(",").map(c => c.trim());
     
     try {
-        // Fetch a range of days to ensure we get the latest available data
+        // 1. Fetch Real-time data from Open-Meteo (Highest accuracy for current atmospheric conditions)
+        const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=relative_humidity_2m,precipitation&timezone=auto`;
+        const omRes = await fetch(openMeteoUrl);
+        const omJson: any = await omRes.json();
+
+        // 2. Fetch NASA Satellite data (Last available Land Surface Temperature)
         const endDate = new Date();
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - 7);
-        
         const formatNASA = (d: Date) => d.toISOString().split('T')[0].replace(/-/g, '');
         const startStr = formatNASA(startDate);
         const endStr = formatNASA(endDate);
-        
-        const powerUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=T2M,TS,RH2M,PRECTOTCORR&community=AG&longitude=${lon}&latitude=${lat}&start=${startStr}&end=${endStr}&format=JSON`;
+        const powerUrl = `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=TS&community=AG&longitude=${lon}&latitude=${lat}&start=${startStr}&end=${endStr}&format=JSON`;
         const powerRes = await fetch(powerUrl);
         const powerJson: any = await powerRes.json();
-        
-        if (powerJson.properties?.parameter) {
-            const params = powerJson.properties.parameter;
-            const dates = Object.keys(params.T2M).sort().reverse(); // Get latest first
+
+        let satelliteSurfTemp = "N/A";
+        let nasaDate = "N/A";
+
+        if (powerJson.properties?.parameter?.TS) {
+            const tsParams = powerJson.properties.parameter.TS;
+            const dates = Object.keys(tsParams).sort().reverse();
             const sanitize = (val: any) => (val === undefined || val === null || val < -900) ? undefined : val;
             
-            let latestData = null;
             for (const date of dates) {
-                const airTemp = sanitize(params.T2M[date]);
-                const surfaceTemp = sanitize(params.TS[date]);
-                if (airTemp !== undefined || surfaceTemp !== undefined) {
-                    latestData = {
-                        airTemperature: airTemp !== undefined ? `${airTemp.toFixed(1)}°C` : "N/A",
-                        surfaceTemperature: surfaceTemp !== undefined ? `${surfaceTemp.toFixed(1)}°C` : "N/A",
-                        humidity: sanitize(params.RH2M[date]) !== undefined ? `${params.RH2M[date].toFixed(1)}%` : "N/A",
-                        precipitation: sanitize(params.PRECTOTCORR[date]) !== undefined ? `${params.PRECTOTCORR[date].toFixed(2)} mm` : "N/A",
-                        observationDate: date
-                    };
+                const ts = sanitize(tsParams[date]);
+                if (ts !== undefined) {
+                    satelliteSurfTemp = `${ts.toFixed(1)}°C`;
+                    nasaDate = date;
                     break;
                 }
             }
-
-            if (latestData) return res.json(latestData);
         }
+
+        const liveAirTemp = omJson.current_weather?.temperature;
+        const liveWind = omJson.current_weather?.windspeed;
+        
+        // Find current hour index for humidity/precip
+        const now = new Date();
+        const currentHourStr = now.toISOString().split(':')[0] + ':00';
+        const hourIdx = omJson.hourly?.time?.findIndex((t: string) => t.startsWith(currentHourStr)) || 0;
+        
+        const liveHumidity = omJson.hourly?.relative_humidity_2m?.[hourIdx];
+        const livePrecip = omJson.hourly?.precipitation?.[hourIdx];
+
+        return res.json({
+            airTemperature: liveAirTemp !== undefined ? `${liveAirTemp.toFixed(1)}°C` : "N/A",
+            surfaceTemperature: satelliteSurfTemp,
+            humidity: liveHumidity !== undefined ? `${liveHumidity}%` : "N/A",
+            precipitation: livePrecip !== undefined ? `${livePrecip.toFixed(2)} mm` : "0.00 mm",
+            observationDate: nasaDate,
+            windSpeed: liveWind !== undefined ? `${liveWind} km/h` : "N/A"
+        });
+
     } catch (e) {
-        console.error("NASA Weather fetch failed:", e);
+        console.error("Weather fetch failed:", e);
     }
 
     // Fallback to local sensor or N/A
