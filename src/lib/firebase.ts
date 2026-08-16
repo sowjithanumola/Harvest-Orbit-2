@@ -30,6 +30,7 @@ if (isProd && !firebaseConfig.apiKey) {
 }
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+const databaseId = getEnv("VITE_FIREBASE_DATABASE_ID") || "ai-studio-harvestorbit-58f5023e-0520-48aa-9904-d7f9665df057";
+export const db = getFirestore(app, databaseId);
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();

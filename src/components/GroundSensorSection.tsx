@@ -2,11 +2,11 @@ import { Thermometer, Droplets, Wifi, Copy } from 'lucide-react';
 import { SensorData } from '../types';
 
 interface Props {
-  data: (SensorData & { isOffline: boolean }) | null;
+  data: SensorData | null;
 }
 
 export function GroundSensorSection({ data }: Props) {
-  const isOnline = data && !data.isOffline;
+  const isOnline = data?.isOnline;
   
   return (
     <div className="theme-card p-6 rounded-2xl shadow-sm">

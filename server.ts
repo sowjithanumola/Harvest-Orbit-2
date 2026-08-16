@@ -159,6 +159,17 @@ Provide a comprehensive diagnosis and recommendation report. Analyze crop health
     }
   });
 
+  // 5. Planetary AI Summary
+  app.post("/api/planetary-summary", async (req, res) => {
+    const { data } = req.body;
+    try {
+      const summary = await GeminiService.getPlanetarySummary(data);
+      res.json({ summary });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to generate AI summary" });
+    }
+  });
+
   // Vite/Production Middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

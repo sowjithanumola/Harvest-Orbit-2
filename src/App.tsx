@@ -22,6 +22,7 @@ import {
 import { ThemeProvider, useTheme } from "./components/ThemeContext";
 import { ProfileModal } from "./components/ProfileModal";
 import { SatelliteLocationView } from "./components/SatelliteLocationView";
+import { PlanetaryVitalSigns } from "./components/PlanetaryVitalSigns";
 import { ApiClient } from "./lib/apiClient";
 
 export default function App() {
@@ -300,6 +301,7 @@ function AppContent() {
       </div>
 
       <FieldSummarySection result={result} sensorData={sensorData} />
+      <PlanetaryVitalSigns />
       {showProfile && <ProfileModal user={user} isGuest={isGuest} onClose={() => setShowProfile(false)} onExitGuest={() => setIsGuest(false)} />}
     </div>
   );
