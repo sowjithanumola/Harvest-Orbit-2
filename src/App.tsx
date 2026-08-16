@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Map, Mail, Lock, User as UserIcon, Loader2 } from "lucide-react";
+import { Map, Mail, Lock, User as UserIcon, Loader2, ShieldCheck } from "lucide-react";
 import { SensorData, AnalysisResult, APIError } from "./types";
 import { SatelliteSection } from "./components/SatelliteSection";
 import { GroundSensorSection } from "./components/GroundSensorSection";
@@ -183,36 +183,72 @@ function AppContent() {
   if (!user && !isGuest) {
       return (
           <div className="min-h-screen flex flex-col items-center justify-center gap-8 p-4 transition-colors duration-300">
-              <h1 className="text-4xl font-extrabold text-harvest-green tracking-tight">Harvest Orbit</h1>
-              <div className="theme-card p-8 rounded-2xl w-full max-w-sm space-y-6 shadow-xl">
-                  <h2 className="text-xl font-bold">Sign In</h2>
+              <div className="flex flex-col items-center gap-2">
+                <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold rounded-full uppercase tracking-widest border border-amber-200 dark:border-amber-800">
+                    Scientific Research Prototype
+                </span>
+                <h1 className="text-4xl font-extrabold text-harvest-green tracking-tight">Harvest Orbit</h1>
+              </div>
+
+              <div className="theme-card p-8 rounded-3xl w-full max-w-sm space-y-6 shadow-2xl relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-harvest-green" />
+                  
+                  <div className="space-y-2">
+                    <h2 className="text-xl font-bold">Agronomist Access</h2>
+                    <p className="text-xs theme-text-secondary leading-relaxed">
+                        Securely monitor global telemetry and local field sensors.
+                    </p>
+                  </div>
+
                   <form onSubmit={handleEmailAuth} className="space-y-4">
                       <div className="relative">
                           <Mail className="absolute left-3 top-3 w-5 h-5 theme-text-secondary" />
-                          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
+                          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Researcher Email" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
                       </div>
                       <div className="relative">
                           <Lock className="absolute left-3 top-3 w-5 h-5 theme-text-secondary" />
-                          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
+                          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Access Key" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
                       </div>
-                      <button type="submit" disabled={authLoading} className="w-full bg-harvest-green text-white py-3 rounded-xl font-bold hover:bg-harvest-green-dark transition-colors disabled:opacity-50">
-                          {isLoginMode ? "Login" : "Sign Up"}
+                      <button type="submit" disabled={authLoading} className="w-full bg-harvest-green text-white py-3 rounded-xl font-bold hover:bg-harvest-green-dark transition-colors disabled:opacity-50 shadow-lg shadow-harvest-green/20">
+                          {isLoginMode ? "Secure Login" : "Create Account"}
                       </button>
                   </form>
-                  {authError && <p className="text-red-500 text-sm font-medium">{authError}</p>}
-                  <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-sm theme-text-secondary hover:text-harvest-green underline">
-                      {isLoginMode ? "Need an account? Sign up" : "Have an account? Login"}
-                  </button>
+
+                  {authError && <p className="text-red-500 text-sm font-medium text-center">{authError}</p>}
+                  
+                  <div className="text-center">
+                    <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-[11px] theme-text-secondary hover:text-harvest-green underline">
+                        {isLoginMode ? "Need researcher credentials? Sign up" : "Already registered? Login here"}
+                    </button>
+                  </div>
+
                   <div className="border-t border-[var(--border)] pt-6 space-y-3">
                       <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 theme-card text-slate-900 dark:text-slate-100 py-3 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm border-[var(--border)]">
                           <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google" className="w-5 h-5" /> 
-                          <span className="theme-text-primary">Login with Google</span>
+                          <span className="theme-text-primary">Continue with Google</span>
                       </button>
-                      <button onClick={() => setIsGuest(true)} className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800 theme-text-primary py-3 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">
-                          Continue as Guest
+                      
+                      <div className="relative py-2">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[var(--border)]" /></div>
+                        <div className="relative flex justify-center text-[10px] uppercase font-bold"><span className="bg-[var(--card-bg)] px-2 theme-text-secondary tracking-widest">Or Recommended</span></div>
+                      </div>
+
+                      <button onClick={() => setIsGuest(true)} className="w-full flex items-center justify-center gap-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 py-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-xl">
+                          Enter as Guest Analyst
                       </button>
                   </div>
+
+                  <div className="pt-4 flex items-start gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-[10px] theme-text-secondary leading-tight">
+                        <strong>Security Note:</strong> All authentication is handled securely by Google Firebase. We do not store or see your passwords.
+                    </p>
+                  </div>
               </div>
+
+              <p className="text-[10px] theme-text-secondary text-center max-w-xs opacity-60">
+                This scientific tool is part of the Harvest Orbit Research Initiative. Data provided is for informational purposes for agricultural professionals.
+              </p>
           </div>
       );
   }
