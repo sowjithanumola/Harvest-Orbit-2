@@ -1,31 +1,25 @@
 
 import { useState, useEffect } from "react";
-import { User as AuthUser } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "../lib/firebase";
 import { useTheme } from "./ThemeContext";
 
-export const ProfileSettings = ({ user }: { user: AuthUser }) => {
+export const ProfileSettings = ({ user }: { user: any }) => {
     const [name, setName] = useState("");
     const [pfp, setPfp] = useState("");
     const { theme, toggleTheme } = useTheme();
 
     useEffect(() => {
-        const loadProfile = async () => {
-            const docRef = doc(db, "users", user.uid);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                setName(data.name || "");
-                setPfp(data.pfp || "");
-            }
-        };
-        loadProfile();
+        // Load from local storage or just use mock
+        const stored = localStorage.getItem(`profile_${user.uid}`);
+        if (stored) {
+            const data = JSON.parse(stored);
+            setName(data.name || "");
+            setPfp(data.pfp || "");
+        }
     }, [user.uid]);
 
     const saveProfile = async () => {
-        await setDoc(doc(db, "users", user.uid), { name, pfp }, { merge: true });
-        alert("Profile updated!");
+        localStorage.setItem(`profile_${user.uid}`, JSON.stringify({ name, pfp }));
+        alert("Profile updated locally!");
     };
 
     return (

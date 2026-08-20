@@ -134,12 +134,12 @@ Provide a comprehensive diagnosis and recommendation report. Analyze crop health
 
   // 3. Sensor Data Ingress (ESP32)
   app.post("/api/sensor-data", async (req, res) => {
-    const { deviceId, temperature, humidity, soilMoisture, heatIndex } = req.body;
+    const { deviceId, temperature, humidity, soilMoisture } = req.body;
     if (!deviceId) return res.status(400).json({ error: "deviceId is required" });
 
     try {
-      await SensorService.updateSensorData(deviceId, { temperature, humidity, soilMoisture, heatIndex });
-      res.json({ success: true, message: "Sensor data synchronized to Firestore" });
+      await SensorService.updateSensorData(deviceId, { temperature, humidity, soilMoisture });
+      res.json({ success: true, message: "Sensor data synchronized" });
     } catch (e: any) {
       console.error("Sensor Sync Error:", e);
       res.status(500).json({ error: "Failed to sync sensor data" });

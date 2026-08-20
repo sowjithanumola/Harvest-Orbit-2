@@ -2,9 +2,11 @@ export interface SensorData {
   deviceId: string;
   temperature: number;
   humidity: number;
-  heatIndex: number;
   soilMoisture?: number;
-  timestamp: any; // Firestore timestamp
+  nitrogen?: number;
+  phosphorus?: number;
+  potassium?: number;
+  timestamp: string;
   isOnline: boolean;
 }
 

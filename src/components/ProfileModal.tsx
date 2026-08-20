@@ -1,19 +1,13 @@
 
 import { useState } from "react";
-import { User as AuthUser } from "firebase/auth";
 import { Settings, X, LogOut, Sun, Moon } from "lucide-react";
 import { useTheme } from "./ThemeContext";
-import { auth } from "../lib/firebase";
 
-export const ProfileModal = ({ user, isGuest, onClose, onExitGuest }: { user: AuthUser | null, isGuest: boolean, onClose: () => void, onExitGuest: () => void }) => {
+export const ProfileModal = ({ user, isGuest, onClose, onExitGuest }: { user: any | null, isGuest: boolean, onClose: () => void, onExitGuest: () => void }) => {
     const { theme, toggleTheme } = useTheme();
 
     const handleLogout = () => {
-        if (isGuest) {
-            onExitGuest();
-        } else {
-            auth.signOut();
-        }
+        onExitGuest();
         onClose();
     };
 

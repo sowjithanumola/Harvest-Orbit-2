@@ -10,15 +10,6 @@ import { SatelliteSection } from "./components/SatelliteSection";
 import { GroundSensorSection } from "./components/GroundSensorSection";
 import { FieldSummarySection } from "./components/FieldSummarySection";
 import { MapComponent } from "./components/MapComponent";
-import { db, auth, provider } from "./lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
-import { 
-    onAuthStateChanged, 
-    signInWithPopup, 
-    User, 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword 
-} from "firebase/auth";
 import { ThemeProvider, useTheme } from "./components/ThemeContext";
 import { ProfileModal } from "./components/ProfileModal";
 import { SatelliteLocationView } from "./components/SatelliteLocationView";
@@ -35,12 +26,8 @@ export default function App() {
 
 function AppContent() {
   const { theme } = useTheme();
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isLoginMode, setIsLoginMode] = useState(true);
-  const [authError, setAuthError] = useState("");
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(false);
   
   const [activeDeviceId, setActiveDeviceId] = useState("FieldNode-01");
   const [formData, setFormData] = useState({
@@ -55,67 +42,30 @@ function AppContent() {
   const [sensorData, setSensorData] = useState<SensorData | null>(null);
   const [locLoading, setLocLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [isGuest, setIsGuest] = useState(false);
+  const [isGuest, setIsGuest] = useState(true);
   const [apiError, setApiError] = useState<APIError | null>(null);
 
+  // Mock sensor data fetching since Firebase is revoked
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthLoading(false);
-      if (currentUser) setIsGuest(false);
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    if (!user && !isGuest || !activeDeviceId.trim()) return;
+    if (!activeDeviceId.trim()) return;
     
-    const unsub = onSnapshot(doc(db, "sensors", activeDeviceId.trim()), (doc) => {
-      if (doc.exists()) {
-        setSensorData(doc.data() as SensorData);
-      } else {
-        setSensorData(null);
-      }
-    }, (error) => {
-        console.error("Firestore error:", error);
-    });
-    return () => unsub();
-  }, [user, isGuest, activeDeviceId]);
+    // Simulate real-time data
+    const interval = setInterval(() => {
+      setSensorData({
+        deviceId: activeDeviceId,
+        timestamp: new Date().toISOString(),
+        soilMoisture: 35 + Math.random() * 5,
+        temperature: 22 + Math.random() * 3,
+        humidity: 60 + Math.random() * 10,
+        nitrogen: 180 + Math.random() * 20,
+        phosphorus: 45 + Math.random() * 5,
+        potassium: 210 + Math.random() * 15,
+        isOnline: true
+      });
+    }, 5000);
 
-  const handleGoogleLogin = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    setAuthError("");
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      console.error("Login failed:", error);
-      let msg = "Google login failed.";
-      if (error.code === 'auth/popup-closed-by-user') msg = "Login popup was closed before completion.";
-      if (error.code === 'auth/popup-blocked') msg = "Popup was blocked by your browser.";
-      setAuthError(msg);
-    }
-  };
-
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError("");
-    setAuthLoading(true);
-    try {
-        if (isLoginMode) {
-            await signInWithEmailAndPassword(auth, email, password);
-        } else {
-            await createUserWithEmailAndPassword(auth, email, password);
-        }
-    } catch (error: any) {
-        let msg = "Authentication failed.";
-        if (error.code === 'auth/invalid-email') msg = "Invalid email format.";
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') msg = "Invalid email or password.";
-        if (error.code === 'auth/email-already-in-use') msg = "This email is already registered.";
-        setAuthError(msg);
-    } finally {
-        setAuthLoading(false);
-    }
-  };
+    return () => clearInterval(interval);
+  }, [activeDeviceId]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -176,79 +126,6 @@ function AppContent() {
       return (
           <div className="min-h-screen flex items-center justify-center">
               <Loader2 className="w-8 h-8 animate-spin text-harvest-green" />
-          </div>
-      );
-  }
-
-  if (!user && !isGuest) {
-      return (
-          <div className="min-h-screen flex flex-col items-center justify-center gap-8 p-4 transition-colors duration-300">
-              <div className="flex flex-col items-center gap-2">
-                <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[10px] font-bold rounded-full uppercase tracking-widest border border-amber-200 dark:border-amber-800">
-                    Scientific Research Prototype
-                </span>
-                <h1 className="text-4xl font-extrabold text-harvest-green tracking-tight">Harvest Orbit</h1>
-              </div>
-
-              <div className="theme-card p-8 rounded-3xl w-full max-w-sm space-y-6 shadow-2xl relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-harvest-green" />
-                  
-                  <div className="space-y-2">
-                    <h2 className="text-xl font-bold">Agronomist Access</h2>
-                    <p className="text-xs theme-text-secondary leading-relaxed">
-                        Securely monitor global telemetry and local field sensors.
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleEmailAuth} className="space-y-4">
-                      <div className="relative">
-                          <Mail className="absolute left-3 top-3 w-5 h-5 theme-text-secondary" />
-                          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Researcher Email" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
-                      </div>
-                      <div className="relative">
-                          <Lock className="absolute left-3 top-3 w-5 h-5 theme-text-secondary" />
-                          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Access Key" className="w-full p-3 pl-10 theme-input rounded-xl outline-none focus:ring-2 focus:ring-harvest-green/50" required />
-                      </div>
-                      <button type="submit" disabled={authLoading} className="w-full bg-harvest-green text-white py-3 rounded-xl font-bold hover:bg-harvest-green-dark transition-colors disabled:opacity-50 shadow-lg shadow-harvest-green/20">
-                          {isLoginMode ? "Secure Login" : "Create Account"}
-                      </button>
-                  </form>
-
-                  {authError && <p className="text-red-500 text-sm font-medium text-center">{authError}</p>}
-                  
-                  <div className="text-center">
-                    <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-[11px] theme-text-secondary hover:text-harvest-green underline">
-                        {isLoginMode ? "Need researcher credentials? Sign up" : "Already registered? Login here"}
-                    </button>
-                  </div>
-
-                  <div className="border-t border-[var(--border)] pt-6 space-y-3">
-                      <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 theme-card text-slate-900 dark:text-slate-100 py-3 rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-sm border-[var(--border)]">
-                          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google" className="w-5 h-5" /> 
-                          <span className="theme-text-primary">Continue with Google</span>
-                      </button>
-                      
-                      <div className="relative py-2">
-                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[var(--border)]" /></div>
-                        <div className="relative flex justify-center text-[10px] uppercase font-bold"><span className="bg-[var(--card-bg)] px-2 theme-text-secondary tracking-widest">Or Recommended</span></div>
-                      </div>
-
-                      <button onClick={() => setIsGuest(true)} className="w-full flex items-center justify-center gap-2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 py-4 rounded-xl font-bold hover:opacity-90 transition-all shadow-xl">
-                          Enter as Guest Analyst
-                      </button>
-                  </div>
-
-                  <div className="pt-4 flex items-start gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                    <p className="text-[10px] theme-text-secondary leading-tight">
-                        <strong>Security Note:</strong> All authentication is handled securely by Google Firebase. We do not store or see your passwords.
-                    </p>
-                  </div>
-              </div>
-
-              <p className="text-[10px] theme-text-secondary text-center max-w-xs opacity-60">
-                This scientific tool is part of the Harvest Orbit Research Initiative. Data provided is for informational purposes for agricultural professionals.
-              </p>
           </div>
       );
   }
